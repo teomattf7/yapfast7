@@ -1,0 +1,198 @@
+diff --git a/crates/yapfast-core/src/discord_audio.rs b/crates/yapfast-core/src/discord_audio.rs
+index d9dd116..672b058 100644
+--- a/crates/yapfast-core/src/discord_audio.rs
++++ b/crates/yapfast-core/src/discord_audio.rs
+@@ -567,6 +567,8 @@ pub fn speakers(
+ /// sets its volume. The gate decides what's sent.
+ struct Processing {
+     echo: AudioProcessingModule,
++    /// The rumble filter alone, in place of `echo` while echo cancellation is off.
++    rumble: AudioProcessingModule,
+     /// Takes out the room's reverb while asked to.
+     dereverb: Option<crate::dereverb::Dereverb>,
+     denoiser: Denoiser,
+@@ -588,6 +590,7 @@ impl Processing {
+         let chosen = crate::noise::chosen();
+         Self {
+             echo,
++            rumble: AudioProcessingModule::new(false, false, true, false),
+             dereverb: None,
+             denoiser: denoiser
+                 .filter(|denoiser| denoiser.suppressor() == chosen)
+@@ -612,7 +615,11 @@ impl Processing {
+     /// to send, as f32 in full scale: none while the gate is shut, or in
+     /// push-to-talk while the key is up.
+     fn block(&mut self, block: &mut [i16]) -> &[[f32; BLOCK]] {
+-        let _ = self.echo.process_stream(block, SAMPLE_RATE as i32, 1);
++        if crate::noise::echo_cancel() {
++            let _ = self.echo.process_stream(block, SAMPLE_RATE as i32, 1);
++        } else {
++            let _ = self.rumble.process_stream(block, SAMPLE_RATE as i32, 1);
++        }
+         let chosen = crate::noise::chosen();
+         if self.denoiser.suppressor() != chosen {
+             tracing::info!(?chosen, "Discord microphone switches noise suppression");
+@@ -644,7 +651,9 @@ impl Processing {
+         for (sample, value) in block.iter_mut().zip(&self.samples) {
+             *sample = value.clamp(-32768.0, 32767.0) as i16;
+         }
+-        let _ = self.gain.process_stream(block, SAMPLE_RATE as i32, 1);
++        if crate::noise::auto_gain() {
++            let _ = self.gain.process_stream(block, SAMPLE_RATE as i32, 1);
++        }
+         // The gate hears the voice at its volume, as it's sent, but before
+         // leveling, which could lift noise past it.
+         let volume = crate::volume::microphone();
+diff --git a/crates/yapfast-core/src/noise.rs b/crates/yapfast-core/src/noise.rs
+index c93000f..c9e6967 100644
+--- a/crates/yapfast-core/src/noise.rs
++++ b/crates/yapfast-core/src/noise.rs
+@@ -59,6 +59,8 @@ static LIMIT: AtomicU32 = AtomicU32::new(Strength::Medium.limit().to_bits());
+ static SENSITIVITY: AtomicU32 = AtomicU32::new(DEFAULT_SENSITIVITY.to_bits());
+ static DEREVERB: AtomicBool = AtomicBool::new(false);
+ static DECLICK: AtomicBool = AtomicBool::new(true);
++static ECHO_CANCEL: AtomicBool = AtomicBool::new(true);
++static AUTO_GAIN: AtomicBool = AtomicBool::new(true);
+ 
+ /// Chooses the suppressor for every call; a call going on switches at its
+ /// next block.
+@@ -125,6 +127,30 @@ pub(crate) fn declick() -> bool {
+     DECLICK.load(Ordering::Relaxed)
+ }
+ 
++/// Lets WebRTC cancel the speakers' echo out of every call's microphone; on
++/// unless this says otherwise. With it off the microphone still gets the
++/// rumble filter. A call going on takes it at its next block.
++pub fn set_echo_cancel(on: bool) {
++    ECHO_CANCEL.store(on, Ordering::Relaxed);
++}
++
++#[cfg(feature = "discord")]
++pub(crate) fn echo_cancel() -> bool {
++    ECHO_CANCEL.load(Ordering::Relaxed)
++}
++
++/// Lets WebRTC control the gain of every call's microphone after the noise
++/// is out; on unless this says otherwise. A call going on takes it at its
++/// next block.
++pub fn set_auto_gain(on: bool) {
++    AUTO_GAIN.store(on, Ordering::Relaxed);
++}
++
++#[cfg(feature = "discord")]
++pub(crate) fn auto_gain() -> bool {
++    AUTO_GAIN.load(Ordering::Relaxed)
++}
++
+ #[cfg(feature = "discord")]
+ pub(crate) use denoise::{BLOCK, Denoiser, Sent};
+ 
+diff --git a/src/ui.rs b/src/ui.rs
+index ee2e4e0..cf05347 100644
+--- a/src/ui.rs
++++ b/src/ui.rs
+@@ -1023,6 +1023,12 @@ struct Layout {
+     noise_strength: yapfast_core::noise::Strength,
+     /// Discord calls take the room's reverb out of the microphone.
+     reduce_room_echo: bool,
++    /// WebRTC cancels the speakers' echo out of Discord calls; on unless turned off.
++    echo_cancel: Option<bool>,
++    /// WebRTC controls the gain of Discord calls' microphone; on unless turned off.
++    auto_gain: Option<bool>,
++    /// The clicks DeepFilterNet leaves are taken out; on unless turned off.
++    declick: Option<bool>,
+     /// The quietest speech Discord calls send, in dBFS; -60 unless changed.
+     input_sensitivity: Option<i32>,
+     /// Whether calls send the voice the gate hears or only while a key is
+@@ -1271,6 +1277,12 @@ impl Layout {
+         yapfast_core::noise::set_strength(self.noise_strength);
+         window.set_dereverb(self.reduce_room_echo);
+         yapfast_core::noise::set_dereverb(self.reduce_room_echo);
++        window.set_echo_cancel(self.echo_cancel.unwrap_or(true));
++        yapfast_core::noise::set_echo_cancel(self.echo_cancel.unwrap_or(true));
++        window.set_auto_gain(self.auto_gain.unwrap_or(true));
++        yapfast_core::noise::set_auto_gain(self.auto_gain.unwrap_or(true));
++        window.set_declick(self.declick.unwrap_or(true));
++        yapfast_core::noise::set_declick(self.declick.unwrap_or(true));
+         let sensitivity = self.sensitivity();
+         window.set_sensitivity(sensitivity);
+         yapfast_core::noise::set_sensitivity(sensitivity as f32);
+diff --git a/src/ui/callbacks.rs b/src/ui/callbacks.rs
+index 597fb2e..def7827 100644
+--- a/src/ui/callbacks.rs
++++ b/src/ui/callbacks.rs
+@@ -1469,6 +1469,12 @@ pub(super) fn bind_callbacks(window: &YapfastWindow, adapter: &Rc<RefCell<Adapte
+         yapfast_core::noise::set_strength(layout.noise_strength);
+         layout.reduce_room_echo = window.get_dereverb();
+         yapfast_core::noise::set_dereverb(layout.reduce_room_echo);
++        layout.echo_cancel = Some(window.get_echo_cancel());
++        yapfast_core::noise::set_echo_cancel(window.get_echo_cancel());
++        layout.auto_gain = Some(window.get_auto_gain());
++        yapfast_core::noise::set_auto_gain(window.get_auto_gain());
++        layout.declick = Some(window.get_declick());
++        yapfast_core::noise::set_declick(window.get_declick());
+         layout.input_sensitivity = Some(window.get_sensitivity());
+         yapfast_core::noise::set_sensitivity(layout.sensitivity() as f32);
+         layout.input_mode = chosen(&INPUT_MODES, window.get_input_mode());
+diff --git a/ui/settings.slint b/ui/settings.slint
+index 1712fa1..ca11174 100644
+--- a/ui/settings.slint
++++ b/ui/settings.slint
+@@ -452,6 +452,9 @@ export component VoiceSettings inherits VerticalLayout {
+     in-out property <int> noise-strength;
+     /// Discord calls take the room's reverb out of the microphone.
+     in-out property <bool> dereverb;
++    in-out property <bool> echo-cancel: true;
++    in-out property <bool> auto-gain: true;
++    in-out property <bool> declick: true;
+     /// The quietest speech Discord calls send, in dBFS; and the microphone as
+     /// the voice gate hears it, refreshed while this shows.
+     in-out property <int> sensitivity: -60;
+@@ -663,6 +666,24 @@ export component VoiceSettings inherits VerticalLayout {
+         checked <=> root.dereverb;
+         toggled => { root.preferences-changed(); }
+     }
++    if root.discord: SettingsSwitch {
++        text: "Cancel the echo of your speakers";
++        description: "Keeps what your speakers play out of your microphone. With headphones, switching it off can make your voice cleaner.";
++        checked <=> root.echo-cancel;
++        toggled => { root.preferences-changed(); }
++    }
++    if root.discord: SettingsSwitch {
++        text: "Even out your microphone's gain";
++        description: "WebRTC raises and lowers the gain as you speak. Switch it off if your voice sounds pumped or grainy, and set the level on the microphone itself.";
++        checked <=> root.auto-gain;
++        toggled => { root.preferences-changed(); }
++    }
++    if root.discord: SettingsSwitch {
++        text: "Remove clicks";
++        description: "Takes out what the noise suppressor leaves of mouth clicks and keyboard taps.";
++        checked <=> root.declick;
++        toggled => { root.preferences-changed(); }
++    }
+     VerticalLayout {
+         spacing: 8px;
+         SettingsHeading { text: "INPUT MODE"; }
+diff --git a/ui/yapfast.slint b/ui/yapfast.slint
+index 2b2e644..283e4f8 100644
+--- a/ui/yapfast.slint
++++ b/ui/yapfast.slint
+@@ -1051,6 +1051,9 @@ export component YapfastWindow inherits Window {
+     in-out property <int> noise-suppression;
+     in-out property <int> noise-strength;
+     in-out property <bool> dereverb;
++    in-out property <bool> echo-cancel: true;
++    in-out property <bool> auto-gain: true;
++    in-out property <bool> declick: true;
+     in-out property <int> sensitivity: -60;
+     /// The Discord microphone as its voice gate hears it, in dBFS, and whether
+     /// the gate is open, refreshed by gate-meter-tick while voice settings
+@@ -3528,7 +3531,7 @@ export component YapfastWindow inherits Window {
+             cameras: root.cameras; camera-index <=> root.camera-index;
+             camera-testing <=> root.camera-testing; camera-preview: root.camera-preview; camera-note: root.camera-note;
+             unmute-on-join <=> root.unmute-on-join; level-voice <=> root.level-voice;
+-            noise-suppression <=> root.noise-suppression; noise-strength <=> root.noise-strength; dereverb <=> root.dereverb; discord: root.discord-linked;
++            noise-suppression <=> root.noise-suppression; noise-strength <=> root.noise-strength; dereverb <=> root.dereverb; echo-cancel <=> root.echo-cancel; auto-gain <=> root.auto-gain; declick <=> root.declick; discord: root.discord-linked;
+             sensitivity <=> root.sensitivity; gate-level: root.gate-level; gate-sending: root.gate-sending; gate-meter-note: root.gate-meter-note;
+             input-mode <=> root.input-mode; talk-key: root.talk-key; talk-recording <=> root.talk-recording;
+             talk-delay <=> root.talk-delay; talk-note: root.talk-note;
