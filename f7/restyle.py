@@ -201,4 +201,61 @@ def restyle_slint():
         mask = mask_text(text)
         pieces, last = [], 0
         for m in SHADOW.finditer(mask):
-            span = element_span(mask
+            span = element_span(mask, m.start())
+            border_ok = False
+            if span:
+                head = mask[: span[0]].rstrip()
+                kind = re.search(r"([A-Za-z_][\w]*)$", head)
+                own = own_text(mask, *span)
+                border_ok = bool(kind and kind.group(1) == "Rectangle" and "border-width" not in own and "border-color" not in own)
+            pieces.append(text[last:m.start()])
+            if border_ok:
+                pieces.append("border-width: 1px; border-color: Theme.line; ")
+                totals["shadow_border"] += 1
+            else:
+                totals["shadow_gone"] += 1
+            last = m.end()
+        pieces.append(text[last:])
+        text = "".join(pieces)
+
+        # the product name inside strings the user reads
+        lines = []
+        for line in text.split("\n"):
+            if not line.lstrip().startswith("//"):
+                line, n = re.subn(
+                    r'"(?:[^"\\]|\\.)*"',
+                    lambda m: m.group(0).replace("Yapfast", BRAND),
+                    line,
+                )
+                totals["brand"] += line.count(BRAND)
+            lines.append(line)
+        text = "\n".join(lines)
+        write(path, text)
+    note("corners made square", totals["radius"])
+    note("font sizes scaled", totals["fonts"])
+    note("shadows -> 1px lines", totals["shadow_border"])
+    note("shadows removed", totals["shadow_gone"])
+    note('product name -> "F7" in strings', totals["brand"])
+
+
+def fonts():
+    folder = UI / "fonts"
+    for f in sorted((ASSETS / "fonts").iterdir()):
+        shutil.copy2(f, folder / f.name)
+    path = UI / "yapfast.slint"
+    text = read(path)
+    if 'default-font-family:' not in text:
+        die("default-font-family of ui/yapfast.slint changed")
+    imports = "".join(
+        f'import "fonts/JetBrainsMono-{w}.ttf";\n'
+        for w in ("Regular", "Italic", "Medium", "Bold", "BoldItalic", "ExtraBold")
+    )
+    anchor = 'import "fonts/DMSans[opsz,wght].ttf";\n'
+    if anchor not in text:
+        anchor = text.split('\n')[0] + '\n'
+    text = text.replace(anchor, anchor + imports, 1)
+    text = re.sub(r'default-font-family:\s*[^;]+;', 'default-font-family: "JetBrains Mono";', text, count=1)
+    write(path, text)
+
+    # emoji bitmaps are fitted to the UI typeface's vertical metrics
+    path = ROOT / "src" / "emoji_
