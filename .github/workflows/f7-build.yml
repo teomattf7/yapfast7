@@ -1,10 +1,16 @@
 # The Windows build with the F7 look: Actions > F7 build > Run workflow.
-# It takes this fork's main (Yapfast plus the f7/ folder), applies f7/patches and f7/restyle.py,
+# It takes the chosen Yapfast version (default: the last one whose Windows build upstream published),
+# adds the f7/ folder from this fork's main, applies f7/patches and f7/restyle.py,
 # builds the Windows ZIP as upstream's Nightly does, and publishes it as a prerelease of this fork.
 name: F7 build
 
 on:
   workflow_dispatch:
+    inputs:
+      upstream_commit:
+        description: "Yapfast commit to build. Empty = this fork's main as it is."
+        required: false
+        default: "432a9368d7ff908a678e10a6f8c3cb41c209ecd4"
 
 permissions:
   contents: write
@@ -22,8 +28,19 @@ jobs:
       - name: Free disk space
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
       - uses: actions/checkout@v5
-        with:
-          ref: main
+      - name: Take the chosen Yapfast version
+        env:
+          COMMIT: ${{ inputs.upstream_commit }}
+        run: |
+          set -e
+          if [ -n "$COMMIT" ]; then
+            cp -r f7 "$RUNNER_TEMP/f7"
+            git fetch --depth 1 origin "$COMMIT" || git fetch --unshallow origin
+            git -c advice.detachedHead=false checkout --force "$COMMIT"
+            rm -rf f7
+            cp -r "$RUNNER_TEMP/f7" f7
+          fi
+          git log -1 --format='building Yapfast %h: %s'
       - name: Apply the F7 patches and restyle
         run: |
           set -e
@@ -69,6 +86,6 @@ jobs:
           set -e
           mkdir release
           mv target/dist/discord/Yapfast-*-windows-x64* release/
-          gh release create "f7-$VERSION" release/* --prerelease --target main \
+          gh release create "f7-$VERSION" release/* --prerelease --target "${{ github.sha }}" \
             --title "F7 $VERSION" \
             --notes "Yapfast with the F7 look, built from this fork's main. Unsigned: Windows SmartScreen will ask once."
