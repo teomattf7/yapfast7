@@ -1,7 +1,6 @@
-#!/usr/bin/env python3
 """F7 restyle for Yapfast.
 
-Run on a clean checkout of Yapfast, from anywhere:   python3 f7/restyle.py
+Run on a clean checkout of Yapfast, from anywhere:    python3 f7/restyle.py
 It rewrites the interface in place (colours, square corners, monospace font, no shadows,
 F7 instead of logos). Nothing here depends on line numbers, so it survives most upstream
 updates. If something it expects is gone, it stops and says what, instead of building a
@@ -26,6 +25,7 @@ DARK = dict(
     rail="#27282b", sidebar="#2e2f33", panel="#2a2b2e", chat="#35363a", stage="#35363a",
     raised="#3e3f44", field="#3d3e43", sunken="#232427", hover="#3b3c41", active="#45464b",
     row_hover="#393a3f", line="#4b4c52", edge="#1f2022",
+    outline="#4b4c52", outline_chat="#4b4c52", outline_field="#4b4c52",
     text="#e5e8e2", secondary="#c4c7c1", muted="#a1a49f", faint="#7e8183",
     accent="#e5e8e2", accent_hover="#f4f6f1", on_accent="#35363a", accent_soft="#e5e8e22a",
     danger="#c97272", danger_hover="#d68686", on_danger="#241818",
@@ -37,6 +37,7 @@ PAPER = dict(
     rail="#d1d4ce", sidebar="#dcdfd9", panel="#d6d9d3", chat="#e5e8e2", stage="#e5e8e2",
     raised="#eef0eb", field="#eff1ec", sunken="#cbcec8", hover="#d8dbd5", active="#ccd0c9",
     row_hover="#e0e3dd", line="#b8bbb5", edge="#c2c5bf",
+    outline="#b8bbb5", outline_chat="#b8bbb5", outline_field="#b8bbb5",
     text="#35363a", secondary="#505156", muted="#666870", faint="#7d7f84",
     accent="#35363a", accent_hover="#4b4c51", on_accent="#e5e8e2", accent_soft="#35363a1f",
     danger="#a44a4a", danger_hover="#8f3d3d", on_danger="#f1f3ee",
