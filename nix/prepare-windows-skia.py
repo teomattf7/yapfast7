@@ -88,7 +88,7 @@ def main():
                  'SKIA_USE_SYSTEM_LIBRARIES']:
         env.pop(name, None)
     print('Building pinned Windows Skia with /MT (two native jobs)', file=sys.stderr)
-    result = subprocess.run(['cargo', 'xwin', 'build', '--locked', '--manifest-path',
+    result = subprocess.run(['cargo', 'xwin', 'build', '--manifest-path',
                              str(ROOT / 'nix/skia-windows-builder/Cargo.toml'),
                              '--target', 'x86_64-pc-windows-msvc',
                              '--message-format=json-render-diagnostics'], cwd=ROOT,
