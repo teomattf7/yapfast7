@@ -258,4 +258,37 @@ def fonts():
     write(path, text)
 
     # emoji bitmaps are fitted to the UI typeface's vertical metrics
-    path = ROOT / "src" / "emoji_
+    path = ROOT / "src" / "emoji_font_tables.rs"
+    text = read(path)
+    for old, new in (
+        ("const ASCENDER: i16 = 984;", "const ASCENDER: i16 = 1020;"),
+        ("const DESCENDER: i16 = -316;", "const DESCENDER: i16 = -300;"),
+        ("bearing_y: 102 + MARGIN as i8,", "bearing_y: 100 + MARGIN as i8;"),
+    ):
+        if old not in text:
+            die(f"emoji metrics changed: {old}")
+        text = text.replace(old, new, 1)
+    write(path, text)
+    note("font: JetBrains Mono + emoji metrics", 1)
+
+
+# ---------------------------------------------------------------- 3. F7 instead of logos
+def logos():
+    for src, dst in (
+        (ASSETS / "icons" / "logo.svg", UI / "icons" / "logo.svg"),
+        (ASSETS / "icons" / "discord.svg", UI / "icons" / "discord.svg"),
+        (ASSETS / "icon.svg", ROOT / "packaging" / "icon.svg"),
+        (ASSETS / "yapfast.ico", ROOT / "packaging" / "windows" / "yapfast.ico"),
+    ):
+        if not dst.exists():
+            die(f"{dst.relative_to(ROOT)} not found (moved upstream?)")
+        shutil.copy2(src, dst)
+    # the tray icon is painted in the old accent colours
+    path = ROOT / "src" / "tray.rs"
+    text = read(path)
+    for old, new in (("#ffbf47", DARK["accent"]), ("#f0545e", DARK["danger"])):
+        if old not in text:
+            die(f"tray colours changed: {old}")
+        text = text.replace(old, new)
+    write(path, text)
+    note
