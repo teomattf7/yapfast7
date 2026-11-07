@@ -8,6 +8,4 @@ publish = false
 
 [dependencies]
 skia-bindings = { version = "=0.157.0", default-features = false, features = ["binary-cache", "ganesh", "gl", "d3d", "jpeg-decode", "jpeg-encode", "pdf"] }
-
-[patch.crates-io]
-syn = { version = "2.0" }
+bindgen = "=0.69.4"
